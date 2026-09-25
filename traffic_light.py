@@ -20,7 +20,7 @@ from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreensh
 from utils.general import (LOGGER, Profile, check_file, check_img_size, check_imshow, check_requirements, colorstr, cv2,
                            increment_path, non_max_suppression, print_args, scale_boxes, strip_optimizer, xyxy2xywh)
 from utils.torch_utils import select_device, smart_inference_mode
-from serial_test import Send
+from serial_test import Send, close
 
 @smart_inference_mode()
 def run(
@@ -120,6 +120,7 @@ def run(
                 writer.writerow(data)
 
         # Process predictions
+        red_light = False  # decide once per frame instead of once per box
         for i, det in enumerate(pred):  # per image
             seen += 1
             if webcam:  # batch_size >= 1
@@ -165,10 +166,8 @@ def run(
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True))
 
-                        if names[c] == 'red':
-                            Send('S')
-                        else:
-                            Send('F')
+                    if names[int(cls)] == 'red':
+                        red_light = True
                         
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
@@ -177,11 +176,26 @@ def run(
             im0 = annotator.result()
             cv2.imshow(str(p), im0)
             cv2.waitKey(1)  # 1 millisecond
-            fps, w, h = 30, im0.shape[1], im0.shape[0]
-            save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
-            vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-            vid_writer[i].write(im0)
+            if save_img:
+                # Open one writer per stream and reuse it. The old code created a new
+                # VideoWriter every frame, overwriting the file and leaking handles.
+                if vid_path[i] != save_path:
+                    vid_path[i] = save_path
+                    if isinstance(vid_writer[i], cv2.VideoWriter):
+                        vid_writer[i].release()
+                    fps = vid_cap.get(cv2.CAP_PROP_FPS) if vid_cap else 30
+                    w, h = im0.shape[1], im0.shape[0]
+                    out_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix
+                    vid_writer[i] = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps or 30, (w, h))
+                vid_writer[i].write(im0)
 
+        # Stop on any red light in the frame, otherwise keep driving.
+        Send('S' if red_light else 'F')
+
+    for writer in vid_writer:
+        if isinstance(writer, cv2.VideoWriter):
+            writer.release()
+    close()
 
 
 def parse_opt():
