@@ -1,7 +1,8 @@
-# YOLOv5 requirements
+# Project requirements (YOLOv5 base + hardware link)
 # Usage: pip install -r requirements.txt
 
 # Base ------------------------------------------------------------------------
+pyserial>=3.5  # Arduino link
 gitpython>=3.1.30
 matplotlib>=3.3
 numpy>=1.22.2

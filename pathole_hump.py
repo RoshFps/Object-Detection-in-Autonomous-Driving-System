@@ -19,7 +19,7 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
 
-from serial_test import Send
+from serial_test import Send, close
 
 @smart_inference_mode()
 def run(
@@ -139,11 +139,11 @@ def run(
                         with open(f'{txt_path}.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
+                    c = int(cls)  # integer class
+                    detection = 1  # pothole or hump ahead: stop, even when nothing is being saved
                     if save_img or save_crop or view_img:  # Add bbox to image
-                        c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True))
-                        detection = 1
                         
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
@@ -152,15 +152,30 @@ def run(
             im0 = annotator.result()
             cv2.imshow(str(p), im0)
             cv2.waitKey(1)  # 1 millisecond
-            fps, w, h = 30, im0.shape[1], im0.shape[0]
-            save_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix on results videos
-            vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-            vid_writer[i].write(im0)
+            if save_img:
+                # Open one writer per stream and reuse it. The old code created a new
+                # VideoWriter every frame, overwriting the file and leaking handles.
+                if vid_path[i] != save_path:
+                    vid_path[i] = save_path
+                    if isinstance(vid_writer[i], cv2.VideoWriter):
+                        vid_writer[i].release()
+                    fps = vid_cap.get(cv2.CAP_PROP_FPS) if vid_cap else 30
+                    w, h = im0.shape[1], im0.shape[0]
+                    out_path = str(Path(save_path).with_suffix('.mp4'))  # force *.mp4 suffix
+                    vid_writer[i] = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps or 30, (w, h))
+                vid_writer[i].write(im0)
 
             if detection == 1:
                 Send('S')
             else:
                 Send('F')
+
+    for writer in vid_writer:
+        if isinstance(writer, cv2.VideoWriter):
+            writer.release()
+    close()
+
+
 def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'pathole_hump.pt', help='model path or triton URL')

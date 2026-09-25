@@ -1,8 +1,14 @@
-import cv2
+"""Detects circular blue direction signs and red stop signs with a webcam.
+
+Usage: python road_sign.py [--camera 0]
+"""
+
+import argparse
+
 import cv2
 import numpy as np
-from scipy.stats import itemfreq
-from serial_test import Send
+
+from serial_test import Send, close
 
 def get_dominant_color(image, n_colors):
     pixels = np.float32(image).reshape((-1, 3))
@@ -11,7 +17,9 @@ def get_dominant_color(image, n_colors):
     flags, labels, centroids = cv2.kmeans(
         pixels, n_colors, None, criteria, 10, flags)
     palette = np.uint8(centroids)
-    return palette[np.argmax(itemfreq(labels)[:, -1])]
+    # scipy.stats.itemfreq was removed from SciPy; np.unique gives the same counts.
+    _, counts = np.unique(labels, return_counts=True)
+    return palette[np.argmax(counts)]
 
 
 clicked = False
@@ -20,11 +28,18 @@ def onMouse(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONUP:
         clicked = True
 
-cap = cv2.VideoCapture(0)
+parser = argparse.ArgumentParser(description="Road sign detection")
+parser.add_argument("--camera", type=int, default=0, help="camera index")
+args = parser.parse_args()
 
-##cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(args.camera)
+if not cap.isOpened():
+    raise SystemExit(f"Could not open camera {args.camera}")
+
 while True:
     success, frame = cap.read()
+    if not success or frame is None:
+        break
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     img = cv2.medianBlur(gray, 37)
@@ -66,9 +81,7 @@ while True:
                     if sum(zone_0_color) > sum(zone_2_color):
                         print("LEFT")
                         Send('L')
-##                        data.write(str.encode('L'))
                     else:
-##                        data.write(str.encode('R'))
                         print("RIGHT")
                         Send('R')
                         
@@ -95,4 +108,5 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+close()
 

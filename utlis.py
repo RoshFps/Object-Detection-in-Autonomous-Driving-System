@@ -1,17 +1,33 @@
+import json
+
 import numpy as np
 import cv2
-import pickle
+from pathlib import Path
 
 def nothing(x):
     pass
 
-def undistort(img, cal_dir='cal_pickle.p'):
-    with open(cal_dir, mode='rb') as f:
-        file = pickle.load(f)
-    mtx = file['mtx']
-    dist = file['dist']
-    dst = cv2.undistort(img, mtx, dist, None, mtx)
-    return dst
+CALIBRATION_FILE = str(Path(__file__).resolve().parent / 'camera_calibration.json')
+_CALIBRATION = {}
+
+
+def load_calibration(cal_path=CALIBRATION_FILE):
+    """Load the camera matrix and distortion coefficients once and cache them.
+
+    Stored as plain JSON: unpickling a file can run arbitrary code, so the
+    old cal_pickle.p format is no longer used.
+    """
+    if cal_path not in _CALIBRATION:
+        with open(cal_path, encoding='utf-8') as f:
+            data = json.load(f)
+        _CALIBRATION[cal_path] = (np.array(data['camera_matrix'], dtype=np.float64),
+                                  np.array(data['dist_coeffs'], dtype=np.float64))
+    return _CALIBRATION[cal_path]
+
+
+def undistort(img, cal_path=CALIBRATION_FILE):
+    mtx, dist = load_calibration(cal_path)
+    return cv2.undistort(img, mtx, dist, None, mtx)
 
 def colorFilter(img):
     hsv = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
@@ -72,7 +88,7 @@ def pipeline(img, s_thresh=(100, 255), sx_thresh=(15, 255)):
     img = undistort(img)
     img = np.copy(img)
     # Convert to HLS color space and separate the V channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float64)
     l_channel = hls[:, :, 1]
     s_channel = hls[:, :, 2]
     h_channel = hls[:, :, 0]
@@ -152,7 +168,7 @@ def sliding_window(img, nwindows=15, margin=50, minpix=1, draw_windows=True):
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
 
     # Set height of windows
-    window_height = np.int(img.shape[0] / nwindows)
+    window_height = int(img.shape[0] / nwindows)
     # Identify the x and y positions of all nonzero pixels in the image
     nonzero = img.nonzero()
     nonzeroy = np.array(nonzero[0])
@@ -190,18 +206,18 @@ def sliding_window(img, nwindows=15, margin=50, minpix=1, draw_windows=True):
         right_lane_inds.append(good_right_inds)
         # If you found > minpix pixels, recenter next window on their mean position
         if len(good_left_inds) > minpix:
-            leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
+            leftx_current = int(np.mean(nonzerox[good_left_inds]))
         if len(good_right_inds) > minpix:
-            rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
+            rightx_current = int(np.mean(nonzerox[good_right_inds]))
 
     #        if len(good_right_inds) > minpix:
-    #            rightx_current = np.int(np.mean([leftx_current +900, np.mean(nonzerox[good_right_inds])]))
+    #            rightx_current = int(np.mean([leftx_current +900, np.mean(nonzerox[good_right_inds])]))
     #        elif len(good_left_inds) > minpix:
-    #            rightx_current = np.int(np.mean([np.mean(nonzerox[good_left_inds]) +900, rightx_current]))
+    #            rightx_current = int(np.mean([np.mean(nonzerox[good_left_inds]) +900, rightx_current]))
     #        if len(good_left_inds) > minpix:
-    #            leftx_current = np.int(np.mean([rightx_current -900, np.mean(nonzerox[good_left_inds])]))
+    #            leftx_current = int(np.mean([rightx_current -900, np.mean(nonzerox[good_left_inds])]))
     #        elif len(good_right_inds) > minpix:
-    #            leftx_current = np.int(np.mean([np.mean(nonzerox[good_right_inds]) -900, leftx_current]))
+    #            leftx_current = int(np.mean([np.mean(nonzerox[good_right_inds]) -900, leftx_current]))
 
     # Concatenate the arrays of indices
     left_lane_inds = np.concatenate(left_lane_inds)
@@ -341,7 +357,6 @@ def stackImages(scale,imgArray):
 def drawLines(img,lane_curve):
     myWidth = img.shape[1]
     myHeight = img.shape[0]
-    print(myWidth,myHeight)
     for x in range(-30, 30):
         w = myWidth // 20
         cv2.line(img, (w * x + int(lane_curve // 100), myHeight - 30),
